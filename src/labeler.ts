@@ -1,74 +1,80 @@
-import * as core from '@actions/core';
-import * as github from '@actions/github';
-import * as yaml from 'js-yaml';
-import {Minimatch, IMinimatch} from 'minimatch';
+import * as core from '@actions/core'
+import * as github from '@actions/github'
+import * as yaml from 'js-yaml'
+import { Minimatch, IMinimatch } from 'minimatch'
 
 interface MatchConfig {
-  all?: string[];
-  any?: string[];
+  all?: string[]
+  any?: string[]
 }
 
-type StringOrMatchConfig = string | MatchConfig;
-type ClientType = ReturnType<typeof github.getOctokit>;
+type StringOrMatchConfig = string | MatchConfig
+type ClientType = ReturnType<typeof github.getOctokit>
 
 export async function run() {
   try {
-    const token = core.getInput('repo-token', {required: true});
-    const configPath = core.getInput('configuration-path', {required: true});
-    const syncLabels = !!core.getInput('sync-labels', {required: false});
+    const token = core.getInput('repo-token', { required: true })
+    const configPath = core.getInput('configuration-path', { required: true })
+    const syncLabels = !!core.getInput('sync-labels', { required: false })
 
-    const prNumber = getPrNumber();
+    const prNumber = getPrNumber()
     if (!prNumber) {
-      console.log('Could not get pull request number from context, exiting');
-      return;
+      console.log('Could not get pull request number from context, exiting')
+      return
     }
 
-    const client: ClientType = github.getOctokit(token);
+    const client: ClientType = github.getOctokit(token)
 
-    const {data: pullRequest} = await client.rest.pulls.get({
+    const { data: pullRequest } = await client.rest.pulls.get({
       owner: github.context.repo.owner,
       repo: github.context.repo.repo,
       pull_number: prNumber
-    });
+    })
 
-    core.debug(`fetching changed files for pr #${prNumber}`);
-    const changedFiles: string[] = await getChangedFiles(client, prNumber);
+    core.debug(`fetching changed files for pr #${prNumber}`)
+    const changedFiles: string[] = await getChangedFiles(client, prNumber)
     const labelGlobs: Map<string, StringOrMatchConfig[]> = await getLabelGlobs(
       client,
       configPath
-    );
+    )
 
-    const labels: string[] = [];
-    const labelsToRemove: string[] = [];
+    const labels: string[] = []
+    const labelsToRemove: string[] = []
     for (const [label, globs] of labelGlobs.entries()) {
-      core.debug(`processing ${label}`);
+      core.debug(`processing ${label}`)
       if (checkGlobs(changedFiles, globs)) {
-        labels.push(label);
+        labels.push(label)
       } else if (pullRequest.labels.find(l => l.name === label)) {
-        labelsToRemove.push(label);
+        labelsToRemove.push(label)
       }
     }
 
-    if (labels.length > 0) {
-      await addLabels(client, prNumber, labels);
+    const hasWriteAccess = await checkWritePermission(
+      client,
+      github.context.repo.repo,
+      github.context.repo.owner,
+      github.context.actor
+    )
+    if (labels.length > 0 && hasWriteAccess) {
+      await addLabels(client, prNumber, labels)
     }
 
     if (syncLabels && labelsToRemove.length) {
-      await removeLabels(client, prNumber, labelsToRemove);
+      await removeLabels(client, prNumber, labelsToRemove)
     }
   } catch (error: any) {
-    core.error(error);
-    core.setFailed(error.message);
+    core.error(error)
+    core.setFailed(error.message)
   }
 }
 
 function getPrNumber(): number | undefined {
-  const pullRequest = github.context.payload.pull_request;
+  const pullRequest = github.context.payload.pull_request
   if (!pullRequest) {
-    return undefined;
+    return undefined
   }
 
-  return pullRequest.number;
+  return pullRequest.number
 }
 
 async function getChangedFiles(
@@ -79,17 +85,17 @@ async function getChangedFiles(
     owner: github.context.repo.owner,
     repo: github.context.repo.repo,
     pull_number: prNumber
-  });
+  })
 
-  const listFilesResponse = await client.paginate(listFilesOptions);
-  const changedFiles = listFilesResponse.map((f: any) => f.filename);
+  const listFilesResponse = await client.paginate(listFilesOptions)
+  const changedFiles = listFilesResponse.map((f: any) => f.filename)
 
-  core.debug('found changed files:');
+  core.debug('found changed files:')
   for (const file of changedFiles) {
-    core.debug('  ' + file);
+    core.debug('  ' + file)
   }
 
-  return changedFiles;
+  return changedFiles
 }
 
 async function getLabelGlobs(
@@ -99,13 +105,13 @@ async function getLabelGlobs(
   const configurationContent: string = await fetchContent(
     client,
     configurationPath
-  );
+  )
 
   // loads (hopefully) a `{[label:string]: string | StringOrMatchConfig[]}`, but is `any`:
-  const configObject: any = yaml.load(configurationContent);
+  const configObject: any = yaml.load(configurationContent)
 
   // transform `any` => `Map<string,StringOrMatchConfig[]>` or throw if yaml is malformed:
-  return getLabelGlobMapFromObject(configObject);
+  return getLabelGlobMapFromObject(configObject)
 }
 
 async function fetchContent(
@@ -117,42 +123,42 @@ async function fetchContent(
     repo: github.context.repo.repo,
     path: repoPath,
     ref: github.context.sha
-  });
+  })
 
-  return Buffer.from(response.data.content, response.data.encoding).toString();
+  return Buffer.from(response.data.content, response.data.encoding).toString()
 }
 
 function getLabelGlobMapFromObject(
   configObject: any
 ): Map<string, StringOrMatchConfig[]> {
-  const labelGlobs: Map<string, StringOrMatchConfig[]> = new Map();
+  const labelGlobs: Map<string, StringOrMatchConfig[]> = new Map()
   for (const label in configObject) {
     if (typeof configObject[label] === 'string') {
-      labelGlobs.set(label, [configObject[label]]);
+      labelGlobs.set(label, [configObject[label]])
     } else if (configObject[label] instanceof Array) {
-      labelGlobs.set(label, configObject[label]);
+      labelGlobs.set(label, configObject[label])
     } else {
       throw Error(
         `found unexpected type for label ${label} (should be string or array of globs)`
-      );
+      )
     }
   }
 
-  return labelGlobs;
+  return labelGlobs
 }
 
 function toMatchConfig(config: StringOrMatchConfig): MatchConfig {
   if (typeof config === 'string') {
     return {
       any: [config]
-    };
+    }
   }
 
-  return config;
+  return config
 }
 
 function printPattern(matcher: IMinimatch): string {
-  return (matcher.negate ? '!' : '') + matcher.pattern;
+  return (matcher.negate ? '!' : '') + matcher.pattern
 }
 
 export function checkGlobs(
@@ -160,73 +166,89 @@ export function checkGlobs(
   globs: StringOrMatchConfig[]
 ): boolean {
   for (const glob of globs) {
-    core.debug(` checking pattern ${JSON.stringify(glob)}`);
-    const matchConfig = toMatchConfig(glob);
+    core.debug(` checking pattern ${JSON.stringify(glob)}`)
+    const matchConfig = toMatchConfig(glob)
     if (checkMatch(changedFiles, matchConfig)) {
-      return true;
+      return true
     }
   }
-  return false;
+  return false
 }
 
 function isMatch(changedFile: string, matchers: IMinimatch[]): boolean {
-  core.debug(`    matching patterns against file ${changedFile}`);
+  core.debug(`    matching patterns against file ${changedFile}`)
   for (const matcher of matchers) {
-    core.debug(`   - ${printPattern(matcher)}`);
+    core.debug(`   - ${printPattern(matcher)}`)
     if (!matcher.match(changedFile)) {
-      core.debug(`   ${printPattern(matcher)} did not match`);
-      return false;
+      core.debug(`   ${printPattern(matcher)} did not match`)
+      return false
     }
   }
 
-  core.debug(`   all patterns matched`);
-  return true;
+  core.debug(`   all patterns matched`)
+  return true
 }
 
 // equivalent to "Array.some()" but expanded for debugging and clarity
 function checkAny(changedFiles: string[], globs: string[]): boolean {
-  const matchers = globs.map(g => new Minimatch(g));
-  core.debug(`  checking "any" patterns`);
+  const matchers = globs.map(g => new Minimatch(g))
+  core.debug(`  checking "any" patterns`)
   for (const changedFile of changedFiles) {
     if (isMatch(changedFile, matchers)) {
-      core.debug(`  "any" patterns matched against ${changedFile}`);
-      return true;
+      core.debug(`  "any" patterns matched against ${changedFile}`)
+      return true
     }
   }
 
-  core.debug(`  "any" patterns did not match any files`);
-  return false;
+  core.debug(`  "any" patterns did not match any files`)
+  return false
 }
 
 // equivalent to "Array.every()" but expanded for debugging and clarity
 function checkAll(changedFiles: string[], globs: string[]): boolean {
-  const matchers = globs.map(g => new Minimatch(g));
-  core.debug(` checking "all" patterns`);
+  const matchers = globs.map(g => new Minimatch(g))
+  core.debug(` checking "all" patterns`)
   for (const changedFile of changedFiles) {
     if (!isMatch(changedFile, matchers)) {
-      core.debug(`  "all" patterns did not match against ${changedFile}`);
-      return false;
+      core.debug(`  "all" patterns did not match against ${changedFile}`)
+      return false
     }
   }
 
-  core.debug(`  "all" patterns matched all files`);
-  return true;
+  core.debug(`  "all" patterns matched all files`)
+  return true
 }
 
 function checkMatch(changedFiles: string[], matchConfig: MatchConfig): boolean {
   if (matchConfig.all !== undefined) {
     if (!checkAll(changedFiles, matchConfig.all)) {
-      return false;
+      return false
     }
   }
 
   if (matchConfig.any !== undefined) {
     if (!checkAny(changedFiles, matchConfig.any)) {
-      return false;
+      return false
     }
   }
 
-  return true;
+  return true
+}
+
+async function checkWritePermission(
+  client: ClientType,
+  repo: string,
+  owner: string,
+  username: string
+) {
+  const response = await client.rest.repos.getCollaboratorPermissionLevel({
+    repo,
+    owner,
+    username: username
+  })
+
+  const level = response.data.permission
+  return level === "write" || level === "admin"
 }
 
 async function addLabels(
@@ -239,7 +261,7 @@ async function addLabels(
     repo: github.context.repo.repo,
     issue_number: prNumber,
     labels: labels
-  });
+  })
 }
 
 async function removeLabels(
@@ -256,5 +278,5 @@ async function removeLabels(
         name: label
       })
     )
-  );
+  )
 }
