@@ -51,8 +51,8 @@ export async function run() {
 
     const hasWriteAccess = await checkWritePermission(
       client,
-      github.context.repo.repo,
       github.context.repo.owner,
+      github.context.repo.repo,
       github.context.actor
     )
     if (labels.length > 0 && hasWriteAccess) {
@@ -237,17 +237,17 @@ function checkMatch(changedFiles: string[], matchConfig: MatchConfig): boolean {
 
 async function checkWritePermission(
   client: ClientType,
-  repo: string,
   owner: string,
+  repo: string,
   username: string
 ) {
-  const response = await client.rest.repos.getCollaboratorPermissionLevel({
-    repo,
+  const level = (await client.rest.repos.getCollaboratorPermissionLevel({
     owner,
-    username: username
-  })
+    repo,
+    username
+  })).data.permission
 
-  const level = response.data.permission
+  core.setOutput("Level", level)
   return level === "write" || level === "admin"
 }
 
