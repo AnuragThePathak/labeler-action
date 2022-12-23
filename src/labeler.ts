@@ -247,7 +247,6 @@ async function checkWritePermission(
     username
   })).data.permission
 
-  core.setOutput("Level", level)
   return level === "write" || level === "admin"
 }
 
