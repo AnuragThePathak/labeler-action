@@ -75,7 +75,8 @@ function run() {
                     labelsToRemove.push(label);
                 }
             }
-            if (labels.length > 0) {
+            const hasWriteAccess = yield checkWriteAccess(client, github.context.repo.owner, github.context.repo.repo, github.context.actor);
+            if (labels.length > 0 && hasWriteAccess) {
                 yield addLabels(client, prNumber, labels);
             }
             if (syncLabels && labelsToRemove.length) {
@@ -219,6 +220,31 @@ function checkMatch(changedFiles, matchConfig) {
         }
     }
     return true;
+}
+function checkWriteAccess(client, owner, repo, username) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const level = (yield client.rest.repos.getCollaboratorPermissionLevel({
+            owner,
+            repo,
+            username
+        })).data.permission;
+        if (level === "admin" || level === "write") {
+            return true;
+        }
+        try {
+            const res = (yield client.rest.orgs.checkMembershipForUser({
+                org: owner,
+                username
+            }));
+            if (res.status == 204) {
+                return true;
+            }
+        }
+        catch (_a) {
+            return false;
+        }
+        return false;
+    });
 }
 function addLabels(client, prNumber, labels) {
     return __awaiter(this, void 0, void 0, function* () {
