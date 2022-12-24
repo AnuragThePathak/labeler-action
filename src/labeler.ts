@@ -49,7 +49,7 @@ export async function run() {
       }
     }
 
-    const hasWriteAccess = await checkWritePermission(
+    const hasWriteAccess = await checkWriteAccess(
       client,
       github.context.repo.owner,
       github.context.repo.repo,
@@ -235,7 +235,7 @@ function checkMatch(changedFiles: string[], matchConfig: MatchConfig): boolean {
   return true
 }
 
-async function checkWritePermission(
+async function checkWriteAccess(
   client: ClientType,
   owner: string,
   repo: string,
@@ -246,8 +246,24 @@ async function checkWritePermission(
     repo,
     username
   })).data.permission
+  
+  if (level === "admin" || level === "write") {
+    return true;
+  } 
 
-  return level === "write" || level === "admin"
+  try {
+    const res = (await client.rest.orgs.checkMembershipForUser({
+      org: owner,
+      username
+    }))
+  
+    if (res.status as number == 204) {
+      return true
+    }
+  } catch {
+    return false
+  }
+  return false
 }
 
 async function addLabels(
