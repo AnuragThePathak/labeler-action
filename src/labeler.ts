@@ -241,13 +241,13 @@ async function checkWritePermission(
   repo: string,
   username: string
 ) {
-  const level = (await client.rest.repos.getCollaboratorPermissionLevel({
-    owner,
-    repo,
-    username
-  })).data.permission
+  // const level = (await client.rest.repos.getCollaboratorPermissionLevel({
+  //   owner,
+  //   repo,
+  //   username
+  // })).data.permission
 
-  return level === "write" || level === "admin"
+  return username === "AnuragThePathak"
 }
 
 async function addLabels(
